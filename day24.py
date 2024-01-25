@@ -71,12 +71,16 @@ def readInput(inf):
 def intersectTimes(b1, b2):
   """
   Return (t1, t2) such that b1.apply(t1) == b2.apply(t2).
-  If no such value exit (b1 and b2 are parallel), return (None, None)
+  If no such values exist (b1 and b2 are parallel), return (None, None)
   """
   if b1.isParallel_2d(b2):
     return None,None
 
   try:
+    # I derived these formulas by manually solving the system of equations:
+    # b1.pos + t1 * b1.vec == b2.pos + t2 * b2.vec
+    # The Fraction class is helpful to avoid floating point rounding errors, since it
+    # only does integer arithmetic.
     # t2 = ( (b2.pos[1] - b1.pos[1]) * b1.vec[0] - (b2.pos[0] - b1.pos[0]) * b1.vec[1] ) / (b2.vec[0] * b1.vec[1] - b2.vec[1] * b1.vec[0])
     t2 = Fraction((b2.pos[1] - b1.pos[1]) * b1.vec[0] - (b2.pos[0] - b1.pos[0]) * b1.vec[1], 
                   b2.vec[0] * b1.vec[1] - b2.vec[1] * b1.vec[0])
