@@ -5,15 +5,15 @@ Advent of Code 2023, day 24: Never Tell Me The Odds
 
 Solving systems of equations.
 
-I took the lazy way out on part 2. Rather than solving the
-system of equations directly, I output them as Mathematica input,
-then used that to solve for the necessary variables.
+My solution for part 2 uses the sympy symbolic math library to solve
+a system of equations, so to run it you'll need to install that.
 
 Ed Karrels, ed.karrels@gmail.com, January 2024
 """
 
-import sys, re, collections, math
+import sys, re, collections, math, time
 from fractions import Fraction
+import sympy
 
 
 line_re = re.compile(r'(\d+), *(\d+), *(\d+) *@ *(-?\d+), *(-?\d+), *(-?\d+)')
@@ -71,16 +71,12 @@ def readInput(inf):
 def intersectTimes(b1, b2):
   """
   Return (t1, t2) such that b1.apply(t1) == b2.apply(t2).
-  If no such values exist (b1 and b2 are parallel), return (None, None)
+  If no such value exit (b1 and b2 are parallel), return (None, None)
   """
   if b1.isParallel_2d(b2):
     return None,None
 
   try:
-    # I derived these formulas by manually solving the system of equations:
-    # b1.pos + t1 * b1.vec == b2.pos + t2 * b2.vec
-    # The Fraction class is helpful to avoid floating point rounding errors, since it
-    # only does integer arithmetic.
     # t2 = ( (b2.pos[1] - b1.pos[1]) * b1.vec[0] - (b2.pos[0] - b1.pos[0]) * b1.vec[1] ) / (b2.vec[0] * b1.vec[1] - b2.vec[1] * b1.vec[0])
     t2 = Fraction((b2.pos[1] - b1.pos[1]) * b1.vec[0] - (b2.pos[0] - b1.pos[0]) * b1.vec[1], 
                   b2.vec[0] * b1.vec[1] - b2.vec[1] * b1.vec[0])
@@ -132,7 +128,7 @@ def part1(beams):
   print(f'part1 {intersections}')
 
 
-def part2(beams):
+def part2WriteMathematicaInput(beams):
   # 300 beams
   """
   The rock has to hit each hailstone, so the time for both equations is
@@ -157,12 +153,17 @@ def part2(beams):
   I pasted into Mathematica so solve it.
   """
 
-  dims = ['x', 'y', 'z']
+  for i, beam in enumerate(beams[:3]):
+    for j, dim in enumerate(['x', 'y', 'z']):
+      print(f'{dim}{i} = {beam.pos[j]};')
+      print(f'd{dim}{i} = {beam.vec[j]};')
+
   print('Solve[{')
   for i, beam in enumerate(beams[:3]):
     for j, dim in enumerate(['x', 'y', 'z']):
       suffix = '' if i==2 and dim=='z' else ','
-      print(f'  {beam.pos[j]} + t{i} * {beam.vec[j]} == {dim} + t{i} * v{dim}{suffix}')
+      # print(f'  {beam.pos[j]} + t{i} * {beam.vec[j]} == {dim} + t{i} * v{dim}{suffix}')
+      print(f'  {dim}{i} + t{i} * d{dim}{i} == {dim} + t{i} * d{dim}{suffix}')
       
   print('}, {x, y, z, vx, vy, vz, t0, t1, t2}]')
 
@@ -185,6 +186,47 @@ def part2(beams):
   print(f'part2 {x+y+z}')
 
 
+def part2sympy(beams):
+  """
+  Use sympy to solve a system of equations for the first three hailstones.
+  Given three hailstone positions and vectors, find times t0, t1, and t2
+  and starting position and vector for the rock. This totals nine unknown
+  values, t0,t1,t2 and 3 dimensions of starting position and vector.
+
+  rock at t0 = hailstone 0 at t0
+    pos + t0 vec = pos0 + t0 vec0
+  rock at t1 = hailstone 0 at t2
+    pos + t1 vec = pos1 + t1 vec1
+  rock at t2 = hailstone 0 at t2
+    pos + t2 vec = pos2 + t2 vec2
+
+  And since each of those equations will solve for 3 dimensions x,y,z there
+  are 9 equations and 9 unknowns.
+  """
+  rock_pos = sympy.symbols('rp0 rp1 rp2')
+  rock_vec = sympy.symbols('rv0 rv1 rv2')
+  times = sympy.symbols('t0 t1 t2')
+
+  equations = []
+  for hailstone_idx in range(3):
+    hail = beams[hailstone_idx]
+    t = times[hailstone_idx]
+    for dim in range(3):
+      eqn = sympy.Eq(sympy.Integer(hail.pos[dim])
+                     + t * sympy.Integer(hail.vec[dim]),
+                     rock_pos[dim] + t * rock_vec[dim])
+      # print(str(eqn))
+      equations.append(eqn)
+
+  solns = sympy.solve(equations, rock_pos + rock_vec + times)
+  assert len(solns) == 1
+
+  rock_pos = solns[0][:3]
+  # print(f'starting pos ({rock_pos[0]}, {rock_pos[1]}, {rock_pos[2]})')
+  print(f'part2 {sum(rock_pos)}')
+  
+
+
 if __name__ == '__main__':
   filename = 'day24.in.txt'
   if len(sys.argv) > 1:
@@ -192,5 +234,5 @@ if __name__ == '__main__':
   with open(filename) as inf:
     beams = readInput(inf)
   part1(beams)
-  part2(beams)
+  part2sympy(beams)
   

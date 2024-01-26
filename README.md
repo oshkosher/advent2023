@@ -9,8 +9,8 @@ won't match mine, and my code might fail on other inputs.
 
 TODO:
 - test code on other inputs by making a few different login ids
-- speed up day 14
 - general solution for day 21
+- speed up day 14
 - speed up day23
-- self-contained solution for day 24 (rather than having Mathematica solve the system of equations)
 - self-contained solution for day 25 (rather than solving visually)
+- solve day 24 without using sympy
