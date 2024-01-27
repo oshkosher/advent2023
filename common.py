@@ -70,15 +70,23 @@ def pasteGrid(dest_grid, dest_row, dest_col, src_grid):
       for r, src_row in enumerate(src_grid):
         tmp = dest_grid[dest_row+r]
         dest_grid[dest_row+r] = tmp[:dest_col] + ''.join(src_row) + tmp[dest_col+src_width:]
-      
+
+
+def gridRowToString(row):
+  if isinstance(row, list):
+    return ''.join([str(e) for e in row])
+  else:
+    return row
       
 
 def printGrid(grid):
   for row in grid:
-    if isinstance(row, list):
-      print(''.join([str(e) for e in row]))
-    else:
-      print(row)
+    print(gridRowToString(row))
+
+    
+def gridToString(grid):
+  return '\n'.join([gridRowToString(row) for row in grid])
+  
 
 
 def gridSearch(grid, target):
