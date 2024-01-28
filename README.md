@@ -8,7 +8,5 @@ Advent of Code is engineered so that different users get different input files a
 won't match mine, and my code might fail on other inputs.
 
 TODO:
-- test code on other inputs by making a few different login ids
 - speed up day23
-- self-contained solution for day 25 (rather than solving visually)
 - solve day 24 without using sympy
