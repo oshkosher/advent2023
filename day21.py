@@ -10,6 +10,9 @@ My solution contains a bunch of constants specific to my input data
 (see quickAnswer()) so it won't work with other input data. If I get
 bored I'll clean it up and make it more robust.
 
+...
+OK, I got bored and figured out a better extrapolation method.
+
 Ed Karrels, ed.karrels@gmail.com, January 2024
 """
 
@@ -441,8 +444,6 @@ def tryCell2(bfs, r, c):
     return
 
   bfs.grid[r][c] = bfs.fill_char
-  # if (r,c) in q: print(f'  dup {r}, {c}')
-  # q.add((r,c))
   bfs.q.append((r,c))
 
 
@@ -478,6 +479,42 @@ def bfsFill(grid, r, c, max_steps, start,
 
   print(f'after {step_no} steps, can reach {cumulative[is_odd]} plots ({cumulative[0]} even, {cumulative[1]} odd)')
 
+
+def bfsFillWithUpdates(grid, r, c, max_steps, start, mod_totals):
+  """
+  Fill the grid in a BFS, and when the step count is congruent to
+  65 mod 131, add the reachable count to mod_totals[].
+  """
+
+  bfs = BFSState(grid, 131, 131)
+  bfs.q.append(start)
+
+  # [sum_even_steps, sum_odd_steps]
+  cumulative = [0, 0]
+  is_odd = 0
+  prev_qlen = 1
+  fill_chars = ['o', 'O']
+  for step_no in range(1, max_steps+1):
+    is_odd = 1 - is_odd
+    qlen = len(bfs.q)
+    bfs.fill_char = fill_chars[is_odd]
+
+    for i in range(qlen):
+      r,c = bfs.q.popleft()
+      tryCell2(bfs, r-1, c)
+      tryCell2(bfs, r+1, c)
+      tryCell2(bfs, r, c-1)
+      tryCell2(bfs, r, c+1)
+
+    cumulative[is_odd] += len(bfs.q)
+    # print(f'after {step_no} steps, can reach {cumulative[is_odd]} plots ({cumulative[0]} even, {cumulative[1]} odd)')
+
+    if step_no % 131 == 65:
+      reachable = cumulative[is_odd]
+      # print(f'after {step_no} steps, can reach {reachable}')
+      mod_totals.append(reachable)
+
+  
 
 def makeOddDuplicate(src, count):
   assert (count % 2) == 1
@@ -795,7 +832,7 @@ def outlineDiamonds(grid, step_count, draw_a = True, draw_b = True):
     
 
 
-def surveyDiamonds(grid, step_count):
+def surveyDiamonds(grid, start, step_count):
   """
   Count the cells in each color, split by diamond.
   Center diamonds with sharp corners are type A.
@@ -880,7 +917,7 @@ def quickAnswer(iter_count):
         
 
 
-def part2(filename):
+def part2(filename, n_layers = 1):
 
   # drawBorders('day21.in.txt', 'day21.png')
 
@@ -901,11 +938,10 @@ def part2(filename):
   # drawGrid(grid, 'day21.000.png')
 
 
-  n_layers = int(sys.argv[1]) + 1
   iter_count = 65 + 131 * (n_layers-1)
 
-  quickAnswer(iter_count)
-  exit(0)
+  # quickAnswer(iter_count)
+  # exit(0)
 
   with open(filename) as inf:
     grid = readGrid(filename, True)
@@ -923,15 +959,62 @@ def part2(filename):
 
 
   # outlineDiamonds(grid, iter_count, True, True)
-  surveyDiamonds(grid, iter_count)
+  surveyDiamonds(grid, start, iter_count)
   """
   counter = collections.Counter()
   for row in grid:
     counter.update(row)
   print(counter)
   """
-  # drawGrid(grid, 'day21.png')
+  drawGrid(grid, 'day21.png')
   # drawGrid(grid, 'day21.png', {'y', (255,255,0)})
+
+
+def part2quadratic(filename):
+  with open(filename) as inf:
+    grid = readGrid(filename, True)
+    
+  n_layers = 3
+
+  grid = makeOddDuplicate(grid, (n_layers-1) * 2 + 1)
+
+  start = gridSearch(grid, 'S')
+  iter_count = (n_layers-1) * 131 + 65
+  
+  r,c = start
+  grid[r][c] = '.'
+  reachables = []
+  bfsFillWithUpdates(grid, r, c, iter_count, start, reachables)
+  # print(repr(reachables))
+  
+  f0, f1, f2 = reachables
+  """
+  given f(0), f(1), and f(2), find a, b, and c for the quadratic formula:
+  f(x) = a x^2 + b x + c
+
+  f(0) = f0 = 3776 = c
+
+  f(1) = f1 = 33652 = a + b + c
+    b = f1 - a - c
+
+  f(2) = f2 = 93270 = 4 a + 2 b + c
+    4 a + 2 b + c = f2
+    4 a + 2 (f1 - a - c) + c = f2
+    4 a + 2 f1 - 2 a - 2 c + c = f2
+    2 a + 2 f1 - c = f2
+    2 a = f2 - 2 f1 + c
+    a = (1/2) (f2 - 2 f1 + c)
+  """
+  c = f0
+  a = (f2 - 2 * f1 + c) // 2
+  b = f1 - a - c
+
+  # 26501365 = 202300 * 131 + 65
+  total_steps = (26501365 - 65) // 131
+
+  f_total_steps = a * total_steps**2 + b * total_steps + c
+  print(f'part2 {f_total_steps}')
+  
 
   
 if __name__ == '__main__':
@@ -940,5 +1023,11 @@ if __name__ == '__main__':
     filename = sys.argv[1]
 
   part1(filename)
-  print(f'part2 {quickAnswer(26501365)}')
+  # print(f'part2 {quickAnswer(26501365)}')
+
+  n_layers = 1
+  if len(sys.argv) > 2:
+    n_layers = int(sys.argv[2])
+  # part2(filename, n_layers)
   
+  part2quadratic(filename)
