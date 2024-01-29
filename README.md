@@ -8,5 +8,4 @@ Advent of Code is engineered so that different users get different input files a
 won't match mine, and my code might fail on other inputs.
 
 TODO:
-- speed up day23
 - solve day 24 without using sympy
