@@ -8,7 +8,7 @@ Jenga and dependency graphs
 Ed Karrels, ed.karrels@gmail.com, January 2024
 """
 
-import sys, re, collections
+import sys, re, collections, time
 
 brick_re = re.compile(r'(\d+),(\d+),(\d+)~(\d+),(\d+),(\d+)')
 
@@ -20,10 +20,6 @@ AXIS_Z = 2
 
 def minFirst(a, b):
   return (a,b) if a <= b else (b,a)
-
-
-def inRange(self, x, rng):
-  return x >= rng[0] and x <= rng[1]
 
 
 class Node:
@@ -122,24 +118,6 @@ class Brick:
     else:
       return f'{self.index}({self.bottom()})'
 
-
-  def fallableDistance(self, cell_stacks):
-    """
-    Returns distance this brick can be lowered without changing z-ordering,
-    and with a minimum z-value of 1.
-    """
-    min_fall = None
-    for (x,y,z) in self.bases():
-      stack = cell_stacks[x][y]
-      i = stack.index(self)
-      if i == 0:
-        fall = self.bottom() - 1
-      else:
-        fall = self.bottom() - stack[i-1].top() - 1
-      if min_fall == None or fall < min_fall:
-        min_fall = fall
-    return min_fall
-
   
   def fall(self, dist):
     """
@@ -148,24 +126,6 @@ class Brick:
     z = self.coords[AXIS_Z]
     z[0] -= dist
     z[1] -= dist
-    
-
-  def listSupporters(self, cell_stacks):
-    """
-    Returns a list of the indices of the bricks supporting me.
-    Those are the ones just below me in the cell stack with top() 1 less
-    than my bottom().
-    """
-    supporters = []
-    for (x,y,z) in self.bases():
-      stack = cell_stacks[x][y]
-      i = stack.index(self)
-      if i == 0:
-        continue
-      below = stack[i-1]
-      if below.top() == self.bottom() - 1:
-        supporters.append(below.index)
-    return supporters
       
 
   def bases(self):
@@ -182,14 +142,6 @@ class Brick:
       for i in range(self.length):
         yield c
         c[self.axis] += 1
-
-      
-  def addToCellStacks(self, cell_stacks):
-    """
-    For each base cube in this brick, add (z, self) to cell_stacks[x][y]
-    """
-    for (x,y,z) in self.bases():
-      cell_stacks[x][y].append((z, self))
 
 
   def contains(self, coord1):
@@ -237,18 +189,12 @@ class Tower:
     # lowest ones (lowest Z value) first.
     self.stacks = [[[] for _ in range(self.sizes[1])] for _ in range(self.sizes[0])]
 
-    # levels[z] is a set of bricks with at least one cube in level z
-    self.levels = [set() for _ in range(self.sizes[2])]
-
     for b in self.bricks:
       if b.axis == AXIS_Z:
         x = b.coords[0][0]
         y = b.coords[1][0]
         self.stacks[x][y].append((b.bottom(), b))
-        for z in range(b.bottom(), b.top()+1):
-          self.levels[z].add(b)
       else:
-        self.levels[b.bottom()].add(b)
         for (x,y,z) in b.bases():
           self.stacks[x][y].append((z, b))
 
@@ -317,48 +263,8 @@ class Tower:
 
   def drop(self, brick, dist):
     if dist <= 0: return
-    
-    # reindex me in layers
-    lo,hi = brick.coords[2]
-    length = hi-lo+1
-    if brick.axis == AXIS_Z:
-      if length < dist:
-        # full move
-        for i in range(length):
-          self.levels[lo+i].remove(brick)
-          self.levels[lo+i-dist].add(brick)
-      else:
-        # partial move
-        for i in range(dist):
-          self.levels[hi-i].remove(brick)
-          self.levels[lo-i-1].add(brick)
-
-    else:
-      # not a Z axis block
-      self.levels[lo].remove(brick)
-      self.levels[lo-dist].add(brick)
-      
     brick.coords[2][0] -= dist
     brick.coords[2][1] -= dist
-
-
-  def intersectsInLevel(self, brick, z):
-    """
-    Returns true of another brick in level z would intersect this brick
-    if it were dropped such that its low z coordinate was z.
-    """
-    for other in self.levels[z]:
-      if brick.intersectsXY(other):
-        return True
-    return False
-
-  
-  def droppableDistanceSlow(self, brick):
-    orig_z = brick.coords[2][0]
-    for dist in range(1, orig_z):
-      if self.intersectsInLevel(brick, orig_z - dist):
-        return dist - 1
-    return orig_z - 1
 
 
   def listSupporters(self, brick):
@@ -380,24 +286,6 @@ class Tower:
 
     # can a node be listed multiple times a a supporter??
     
-    return supporters
-
-
-  def listSupportersSlow(self, brick):
-    """
-    Returns a list of the indices of the bricks supporting this brick.
-    Those are the ones that would intersect with this brick if it
-    were dropped one unit.
-    """
-    if brick.bottom() <= 1:
-      return []
-    
-    supporters = []
-    for other in self.levels[brick.bottom()-1]:
-      if brick.intersectsXY(other):
-        supporters.append(other)
-
-    # = [o for o in self.levels[brick.bottom()-1] if brick.intersectsXY(o)]
     return supporters
 
 
@@ -462,15 +350,13 @@ class Tower:
     in its in_nodes have fallen then add it to the fallen set. 
     """
 
-    fallen_nodes = set()
-    traverse_q = collections.deque()
     for node in node_list:
-      # Pass in the set and queue to reuse them.
-      # XXX But measure the performance to see if this actually helps.
-      node.fall_size = self.computeFallSize(node, fallen_nodes, traverse_q)
+      node.fall_size = self.computeFallSize(node)
       
 
-  def computeFallSize(self, root_node, fallen_nodes, traverse_q):
+  def computeFallSize(self, root_node):
+    fallen_nodes = set()
+    traverse_q = collections.deque()
     fallen_nodes.add(root_node)
     traverse_q.append(root_node)
     while len(traverse_q) > 0:
@@ -483,9 +369,7 @@ class Tower:
         
     result = len(fallen_nodes) - 1
     # print(f'Fall set if {root_node} is removed: {" ".join([str(x) for x in fallen_nodes])}')
-    fallen_nodes.clear()
     return result
-    
       
 
 def readInput(inf):
@@ -495,125 +379,6 @@ def readInput(inf):
     bricks.append(Brick(i, line))
 
   return bricks
-
-
-def printCellStacks(cell_stacks):
-  for x in range(len(cell_stacks)):
-    for y in range(len(cell_stacks[x])):
-      print(f'stack({x},{y}): ' + ' '.join([b.verticalRangeStr() for b in cell_stacks[x][y]]))
-
-
-def releaseAll(bricks, cell_stacks):
-  """
-  Let all bricks fall until they can fall no more.
-  """
-
-  bricks_bottom_up = bricks.copy()
-  bricks_bottom_up.sort()
-  
-  still_falling = True
-  release_iter = 0
-  while still_falling:
-    release_iter += 1
-    print(f'release iter {release_iter}')
-    """
-    for b in bricks:
-      sups = ' '.join([str(x) for x in b.listSupporters(cell_stacks)])
-      print(f'  supporters of {b.index}({b.bottom()}): {sups}')
-    """
-    
-    still_falling = False
-    for b in bricks_bottom_up:
-      dist = b.fallableDistance(cell_stacks)
-      if dist > 0:
-        still_falling = True
-        b.fall(dist)
-        print(f'Drop {b.index} by {dist}: {b}')
-        # sups = ' '.join([str(x) for x in b.listSupporters(cell_stacks)])
-        # print(f'    supporters of {b.index}({b.bottom()}): {sups}')
-
-
-def countRemovableBricks(bricks, cell_stacks):
-  essential_brick_ids = set()
-  
-  for b in bricks:
-    # for each brick, make a list of the bricks supporting it
-    supporters = b.listSupporters(cell_stacks)
-    # sups = ' '.join([str(x) for x in supporters])
-    # print(f'supporters of {b.index}: {sups}')
-    
-    # if there is a single brick supporting it, add that brick
-    # to the essential set
-    if len(supporters) == 1:
-      essential_brick_ids.add(supporters[0])
-
-  esses = ' '.join([str(x) for x in essential_brick_ids])
-  # print(f'essentials: {esses}')
-  
-  # count non-essential bricks
-  return len(bricks) - len(essential_brick_ids)
-        
-
-def printBricks(bricks):
-  def range(a, b):
-    if a == b:
-      return str(a)
-    else:
-      return str(a) + '-' + str(b)
-    
-  for i, brick in enumerate(bricks):
-    print(f'{i}: ({range(brick.x1, brick.x2)},{range(brick.y1, brick.y2)},{range(brick.z1, brick.z2)}')
-  
-
-def part1old():
-  bricks = readInput(sys.stdin)
-  # bricks = readInput(open('day22.in.txt'))
-
-  # for i, brick in enumerate(bricks):
-  #   print(f'brick {i} base')
-  #   for coord in brick.bases():
-  #     print(f'  {coord}')
-
-
-  width_x = bricks[0].x1 + 1
-  width_y = bricks[0].y1 + 1
-
-  for b in bricks:
-    width_x = max(width_x, b.x2 + 1)
-    width_y = max(width_y, b.y2 + 1)
-
-  print(f'width_x={width_x}, width_y={width_y}')
-
-  # 3-d list
-  # cell_stacks[x][y] is a list of bricks stacked in that cell, with the
-  # lowest ones (lowest Z value) first.
-  cell_stacks = [[[] for _ in range(width_y)] for _ in range(width_x)]
-
-  # create (z, brick) entries in cell_stacks
-  for brick in bricks:
-    brick.addToCellStacks(cell_stacks)
-
-  # order by z-coordinate in each stack and replace each tuple with
-  # just the brick reference
-  for row in cell_stacks:
-    for stack in row:
-      stack.sort()
-      stack[:] = [s[1] for s in stack]
-
-  printCellStacks(cell_stacks)
-  
-  # print('before release')
-  # printBricks(bricks)
-  
-  releaseAll(bricks, cell_stacks)
-
-  # print('after release')
-  # printBricks(bricks)
-  # printCellStacks(cell_stacks)
-
-  # Find which bricks
-  n = countRemovableBricks(bricks, cell_stacks)
-  print(f'part1 {n}')
  
 
 def part1(filename):
@@ -622,7 +387,6 @@ def part1(filename):
   # print(f'{len(bricks)} bricks created')
   tower = Tower(bricks)
 
-  # printCellStacks(tower.stacks)
   tower.dropAll()
 
   n_removable = tower.countRemovableBricks()
@@ -635,7 +399,6 @@ def part2(filename):
   # print(f'{len(bricks)} bricks created')
   tower = Tower(bricks)
 
-  # printCellStacks(tower.stacks)
   tower.dropAll()
 
   graph = tower.buildSupportGraph()
@@ -647,24 +410,14 @@ def part2(filename):
     # print(f'Brick {node.brick.index} fall size {node.fall_size}')
 
   print(f'part2 {fall_size_sum}')
-
-  """
-  sole_supporters = set()
-  for node in graph:
-    # sups = ' '.join([str(x) for x in node.in_nodes])
-    # print(f'{node} supporters = {sups}')
-    if len(node.in_nodes) == 1:
-      for n in node.in_nodes:
-        sole_supporters.add(n)
-  print(f'{len(sole_supporters)} sole supporters, {len(bricks) - len(sole_supporters)} disintegratable')
-  """
-
   
 
 if __name__ == '__main__':
   filename = 'day22.in.txt'
   if len(sys.argv) > 1:
     filename = sys.argv[1]
+  timer = time.time()
   part1(filename)
   part2(filename)
-  
+  timer = time.time() - timer
+  # print(f'timer {timer:.3f}')
