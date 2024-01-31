@@ -33,164 +33,147 @@ Start >  a > b > c > d > e
 Ed Karrels, ed.karrels@gmail.com, January 2024
 """
 
-import sys, collections, random, time
+import sys, collections, random, time, copy
 from common import *
-from draw_grid import drawGrid
+# from draw_grid import drawGrid
 
-
-class Edge:
-  def __init__(self, index):
-    self.index = index
-    self.vertices = []
-    self.length = None
-
-    # if is_directed then can only traverse from vertices[0]->vertices[1],
-    # not vertices[1]->vertices[0].
-    self.is_directed = False
-
-    # choose a random light color
-    min_c = 100
-    self.color = (random.randint(min_c, 255), random.randint(min_c, 255),
-                  random.randint(min_c, 255))
-
-  def addVertex(self, vertex):
-    if vertex not in self.vertices:
-      assert len(self.vertices) < 2
-      self.vertices.append(vertex)
-
-  def otherVertex(self, vertex):
-    if len(self.vertices) != 2:
-      return None
-
-    if self.vertices[0] == vertex:
-      return self.vertices[1]
-
-    if self.is_directed:
-      return None
-
-    if self.vertices[1] == vertex:
-      return self.vertices[0]
-
-    return None
-
-  def setIsDirected(self, src_vertex):
-    """
-    Set this edge to be directed and with src_vertex as the incoming vertex.
-    """
-    assert src_vertex in self.vertices
-    if self.vertices[1] == src_vertex:
-      self.vertices.reverse()
-    self.is_directed = True
-    # print(f'set edge {self.index} directed {self.vertices[0].index} -> {self.vertices[1].index}')
-
-  def __repr__(self):
-    return f'Edge({self.index},len={self.length})'
+FLOW_BI = 0
+FLOW_FORE = 1
+FLOW_BACK = 2
 
 
 class Vertex:
   def __init__(self, index, r, c):
     self.index = index
     self.coord = (r,c)
-    self.edges = []
     self.visited = False
 
-  def addEdge(self, edge):
-    if edge not in self.edges:
-      self.edges.append(edge)
+    # reachable vertices, with edge length
+    # (vertex, length)
+    self.peers = []
+
+  def findPeer(self, vertex):
+    for i, peer in enumerate(self.peers):
+      if peer[0] == vertex:
+        return i
+    return -1
+
+  def addPeer(self, vertex, length):
+    if -1 == self.findPeer(vertex):
+      self.peers.append((vertex, length))
+
+  def removePeer(self, vertex):
+    i = self.findPeer(vertex)
+    assert i > -1
+    del(self.peers[i])
+
+  def makeBiDirectional(self):
+    for peer, length in self.peers:
+      peer.addPeer(self, length)
 
   def coordStr(self):
     return f'{self.coord[0]},{self.coord[1]}'
 
-  def findEdgeTo(self, dest_vertex):
-    for edge in self.edges:
-      vtx = edge.otherVertex(self)
-      if vtx == dest_vertex:
-        return edge
-    return None
-
   def __repr__(self):
-    edge_list = ','.join([str(e.index) for e in self.edges])
-    return f'Vertex({self.index} at {self.coord[0]},{self.coord[1]} edges {edge_list})'
+    peer_list = ', '.join([f'{length}->{dest.index}' for dest,length in self.peers])
+    return f'Vertex({self.index} at {self.coord[0]},{self.coord[1]}: {peer_list})'
     
 
 class Graph:
   def __init__(self):
-    # coord -> Vertex
-    self.vertices = {}
+    self.vertex_list = []
     
-    self.edges = []
+    # coord -> Vertex
+    self.vertex_map = {}
+    
+    self.entry_edge_len = None
+    self.exit_edge_len = None
 
-  def createEdge(self):
-    index = len(self.edges)
-    edge = Edge(index)
-    self.edges.append(edge)
-    return edge
 
   def createVertex(self, r, c):
     coord = (r,c)
-    vertex = self.vertices.get(coord, None)
+    vertex = self.vertex_map.get(coord, None)
     if not vertex:
-      index = len(self.vertices)
+      # index = len(self.vertex_list)
+      
+      # set vertex indices to powers of 2
+      index = 1 << len(self.vertex_list)
+      
       vertex = Vertex(index, r, c)
-      self.vertices[coord] = vertex
+      self.vertex_list.append(vertex)
+      self.vertex_map[coord] = vertex
     return vertex
 
-  def connect(self, vertex, edge):
-    vertex.addEdge(edge)
-    edge.addVertex(vertex)
+  def connectVertices(self, vtx1, vtx2, length, flow_direction = FLOW_BI):
+    if flow_direction in [FLOW_FORE, FLOW_BI]:
+      vtx1.addPeer(vtx2, length)
+    if flow_direction in [FLOW_BACK, FLOW_BI]:
+      vtx2.addPeer(vtx1, length)
 
   def clearVisited(self):
-    for vertex in self.vertices.values():
+    for vertex in self.vertex_list:
       vertex.visited = False
+          
+  def makePerimeterDirectional(self):
+    first_vertex = self.vertex_list[0]
+    last_vertex = self.vertex_list[1]
+
+    def nextPerimeterVertex(src):
+      # find my peer with 3 peers
+      for dest,_ in src.peers:
+        if dest == last_vertex or len(dest.peers) == 3:
+          return dest
+      return None
+
+    assert len(first_vertex.peers) == 2
+    for vertex,_ in first_vertex.peers:
+      # set this edge as directed by removing peer -> first_vertex
+      vertex.removePeer(first_vertex)
+      while True:
+        next = nextPerimeterVertex(vertex)
+        next.removePeer(vertex)
+        if next == last_vertex:
+          break
+        vertex = next
+
+  def makeAllEdgesBiDirectional(self):
+    for vertex in self.vertex_list:
+      vertex.makeBiDirectional()
 
   def print(self):
-    print('graph edges')
-    for edge in self.edges:
-      vertex_list = ' '.join([str(v.index) for v in edge.vertices])
-      print(f'  {edge} vertices {vertex_list}')
     print('graph vertices')
-    for vertex in self.vertices.values():
+    for vertex in self.vertex_list:
       print(f'  {vertex}')
 
   def writeGraphViz(self, filename):
     with open(filename, 'w') as outf:
       outf.write('digraph day23 {\n')
 
-      first_vertex = self.edges[0].vertices[0]
-      last_vertex = self.edges[1].vertices[0]
-      
-      outf.write(f'  n{first_vertex.index} [shape=Mdiamond];\n')
-      outf.write(f'  n{last_vertex.index} [shape=Msquare];\n')
+      def vertexName(v):
+        return 'v' + str(v.index)
 
-      for edge in self.edges:
-        if len(edge.vertices) >= 2:
-          tag = '' if edge.is_directed else '[dir=none]'
-          outf.write(f'  n{edge.vertices[0].index} -> n{edge.vertices[1].index} [label={edge.length}] {tag}\n')
+      def vertexName2(v):
+        return f'v{v.index}_{v.coord[0]}_{v.coord[1]}'
+
+      first_vertex = self.vertex_list[0]
+      last_vertex = self.vertex_list[1]
+      
+      outf.write(f'  {vertexName(first_vertex)} [shape=Mdiamond];\n')
+      outf.write(f'  {vertexName(last_vertex)} [shape=Msquare];\n')
+
+      for vtx in self.vertex_list:
+        for peer, length in vtx.peers:
+          is_bi = False
+          # if bidirectional, only output once
+          if peer.findPeer(vtx) != -1:
+            is_bi = True
+            if peer.index < vtx.index:
+              continue
+          tag = '[dir=none]' if is_bi else ''
+          outf.write(f'  {vertexName(vtx)} -> {vertexName(peer)} [label={length}] {tag}\n')
 
       outf.write('}\n')
     print(f'wrote {filename}')
-    
-
-
-def part1(filename):
-  with open(filename) as inf:
-    grid = readGrid(inf, True)
-  assert grid[0][1] == '.'
-
-  # drawGrid(grid, 'day23.png',
-  #          {'>': (0,255,0),  # right green
-  #           'v': (0,0,255),  # down blue
-  #           })
-
-  # drawGrid(grid, 'day23b.png',
-  #          {'>': (255,255,255),
-  #           'v': (255,255,255),
-  #           })
-
-  path_lengths = findAllPathLengths(grid)
-
-  path_lengths.sort()
-  print(f'part1 {path_lengths[-1]}')
 
 
 def findAllPathLengths(grid):
@@ -311,10 +294,10 @@ def appendAvailableDirections(r, c, grid, cell):
     cell.append(LEFT)
 
 
-def entryTraverse(grid, r, c, edge):
+def entryTraverse(grid, r, c, fill):
   """
   Start traversing from (r,c), which is either the entry or the exit.
-  Fill each cell with the value (edge) until an intersection is found.
+  Fill each cell with the value (fill) until an intersection is found.
   Fill the intersection with '+'.
   Return the coordinates of the intersection and the length of the traverse.
   For example: [r, c, length]
@@ -328,15 +311,15 @@ def entryTraverse(grid, r, c, edge):
 
   # handle the first step manually so we don't have to check bounds again.
   assert r == 0 or r == len(grid)-1
-  # print(f'entry traverse from {r},{c} edge {edge}')
-  grid[r][c] = edge
+  # print(f'entry traverse from {r},{c} fill {fill}')
+  grid[r][c] = fill
   if r == 0:
     r += 1
   else:
     r -= 1
   length = 1
 
-  nonempty = ['#', edge]
+  nonempty = ['#', fill]
 
   available_directions = []
 
@@ -352,7 +335,7 @@ def entryTraverse(grid, r, c, edge):
     assert 1 <= len(available_directions) <= 2
     if len(available_directions) == 1:
       length += 1
-      grid[r][c] = edge
+      grid[r][c] = fill
       r, c = move(r, c, available_directions[0])
     else:
       # intersection found
@@ -360,14 +343,20 @@ def entryTraverse(grid, r, c, edge):
       return [r, c, length]
 
 
-def interiorTraverse(grid, r, c, incoming_direction, edge):
+def interiorTraverse(grid, r, c, prev_direction, fill):
   """
   Traverse from a known intersection to the next intersection, known or not.
   Returns the coordinates of that intersection and the length of the traverse:
-    [r, c, length]
+    [r, c, length, direction]
 
   For this traversal, we consider an adjacent '+' an empty cell,
   and '#' or my edge a full cell.
+
+  The direction return field reports whether there were any
+  directional '>' or 'v' symbols encountered. If not, it will be
+  FLOW_BI.  If one ore more symbols were encountered, then if the
+  traverse was in the directions of the symbols this will
+  FLOW_FORE, otherwise FLOW_BACK.
 
   Special-case the start, to get started in the right direction,
   since it will look like a corridor with adjacent cells +, #, ., #.
@@ -378,38 +367,54 @@ def interiorTraverse(grid, r, c, incoming_direction, edge):
     2 empty (3-way intersection found)
     3 empty (4-way intersection found)
   we should never run into a dead end with these mazes.
+
   """
-
-  # check that my incoming direction was set correctly
-  origin_r, origin_c = move(r, c, invDir(incoming_direction))
-  assert '+' == grid[origin_r][origin_c]
-
-  # print(f'interiorTraverse edge {edge.index} {direction_names[incoming_direction]} from {edge.vertices[0]}')
   
   empty_directions = []
 
-  nonempty = ['#', edge]
+  nonempty = ['#', fill]
+  flow_direction = FLOW_BI
   
   def tryDirection(r, c, d):
     r,c = move(r, c, d)
     if grid[r][c] not in nonempty:
       empty_directions.append(d)
 
+  def flowDirection(flow_direction, move_direction, cell, r, c):
+    if cell == '.':
+      return flow_direction
+
+    prev_flow = flow_direction
+    if cell == '>':
+      # print(f'  at {r},{c} > moving {direction_names[move_direction]}')
+      flow_direction = FLOW_FORE if move_direction == RIGHT else FLOW_BACK
+    else:
+      assert cell == 'v'
+      # print(f'  at {r},{c} v moving {direction_names[move_direction]}')
+      flow_direction =  FLOW_FORE if move_direction == DOWN else FLOW_BACK
+
+    if prev_flow != FLOW_BI and flow_direction != prev_flow:
+      print(f'  ERROR was flow={prev_flow} now {flow_direction}')
+      
+    return flow_direction
+    
 
   # first cell
   assert grid[r][c] in ['.', '>', 'v']
+  flow_direction = flowDirection(flow_direction, prev_direction, grid[r][c], r, c)
   length = 1
-  grid[r][c] = edge
+  grid[r][c] = fill
   for direction in range(1, 5):
     tryDirection(r, c, direction)
   assert len(empty_directions) == 2
-  assert incoming_direction in empty_directions
-  assert invDir(incoming_direction) in empty_directions
-  r,c = move(r, c, incoming_direction)
+  assert prev_direction in empty_directions
+  assert invDir(prev_direction) in empty_directions
+  r,c = move(r, c, prev_direction)
+
+  # completed intersections at both ends, length == 1
+  # print('  single-cell fill')
   if grid[r][c] == '+':
-    # completed intersections at both ends, length == 1
-    # print('  single-cell edge')
-    return r, c, length
+    return r, c, length, flow_direction
   
   while True:
     empty_directions.clear()
@@ -418,47 +423,22 @@ def interiorTraverse(grid, r, c, incoming_direction, edge):
 
     if len(empty_directions) == 1:
       length += 1
-      grid[r][c] = edge
-      r,c = move(r, c, empty_directions[0])
+      flow_direction = flowDirection(flow_direction, prev_direction, grid[r][c], r, c)
+      grid[r][c] = fill
+      prev_direction = empty_directions[0]
+      r,c = move(r, c, prev_direction)
     else:
       # print(f'  end at {r},{c} length {length}')
-      return [r, c, length]
-
-
-def makePerimeterDirectional(graph):
-  first_edge = graph.edges[0]
-  first_vertex = first_edge.vertices[0]
-  last_vertex = graph.edges[1].vertices[0]
-
-  def nextPerimeterVertex(vertex):
-    for edge in vertex.edges:
-      nv = edge.otherVertex(vertex)
-      if nv and len(nv.edges) == 3:
-        return (edge, nv)
-    return None
-
-  assert len(first_vertex.edges) == 3
-  for edge in first_vertex.edges:
-    if edge != first_edge:
-      edge.setIsDirected(first_vertex)
-      vertex = edge.otherVertex(first_vertex)
-      while True:
-        (edge, nv) = nextPerimeterVertex(vertex)
-        edge.setIsDirected(vertex)
-        if nv == last_vertex:
-          break
-        vertex = nv
+      return r, c, length, flow_direction
 
 
 def buildGraph(grid):
   """
-  Build graph more cleanly.
+  Build graph for use in part1 and part2.
 
-  Start with a special traverse from the entrance to the first intersection,
-  then from the exit to the last intersection.
+  During initial traversal, mark one-way edges according to '>' and 'v' cells.
 
-  During traversals, silenty overwrite one-way marks ">" and "v" as empty "."
-  Fill each spot with an integer for the edge index.
+  For part2, revert all edges to bidirectional, then mark perimeter edges as one-way.
   """
   graph = Graph()
 
@@ -467,164 +447,195 @@ def buildGraph(grid):
   exit_c = len(grid[0])-2
   assert grid[0][1] == '.' and grid[exit_r][exit_c] == '.'
 
-  # each entry is a Vertex object
-  isect_to_traverse = collections.deque()
+  # queue of vertices from which to traverse outgoing hallways
+  traverse_q = collections.deque()
 
-  entry_edge = graph.createEdge()
-  ir, ic, entry_edge.length = entryTraverse(grid, 0, 1, entry_edge)
-  isect = graph.createVertex(ir, ic)
-  graph.connect(isect, entry_edge)
-  isect_to_traverse.append(isect)
-  
-  exit_edge = graph.createEdge()
-  ir, ic, exit_edge.length = entryTraverse(grid, exit_r, exit_c, exit_edge)
-  isect = graph.createVertex(ir, ic)
-  graph.connect(isect, exit_edge)
-  isect_to_traverse.append(isect)
+  edge_id = 0
+  ir, ic, graph.entry_edge_len = entryTraverse(grid, 0, 1, edge_id)
+  start_vertex = graph.createVertex(ir, ic)
+  traverse_q.append(start_vertex)
+
+  edge_id += 1
+  ir, ic, graph.exit_edge_len = entryTraverse(grid, exit_r, exit_c, edge_id)
+  end_vertex = graph.createVertex(ir, ic)
 
   empty = ['.', '>', 'v']
 
-  while isect_to_traverse:
-    isect = isect_to_traverse.popleft()
+  while traverse_q:
+    isect = traverse_q.popleft()
     ir,ic = isect.coord
+
+    # if this intersection has already been traversed, it will be
+    # marked with a '+' in the grid
+    
     if grid[ir][ic] == '+':
       continue
 
-    grid[ir][ic] = '+'
     # print(f'traverse {isect}')
-    
+    grid[ir][ic] = '+'
+    # printGrid(grid)
+
+    # try all outgoing directions
     for d in range(1, 5):
       r,c = move(ir, ic, d)
       cell = grid[r][c]
       if cell in empty:
-        edge = graph.createEdge()
-        graph.connect(isect, edge)
-        nr, nc, edge.length = interiorTraverse(grid, r, c, d, edge)
+        edge_id += 1
+        nr, nc, length, flow_dir = interiorTraverse(grid, r, c, d, edge_id)
         next_isect = graph.createVertex(nr, nc)
-        graph.connect(next_isect, edge)
-        isect_to_traverse.append(next_isect)
-      elif cell != '#':
-        assert isinstance(cell, Edge)
-        graph.connect(isect, cell)
+        # print(f'  {direction_names[d]} {length} to {next_isect} flow={flow_dir}')
+        graph.connectVertices(isect, next_isect, length, flow_dir)
+        traverse_q.append(next_isect)
+
+  # graph.makePerimeterDirectional()
+  # graph.writeGraphViz('day23b.gv')
+
+  # print(f'entry {graph.edges[0].length}, exit {graph.edges[1].length}')
         
   return graph
 
 
 class TraverseData:
-  def __init__(self, graph, start_vertex, end_vertex):
+  def __init__(self, graph, end_vertex):
     self.graph = graph
-    self.start_vertex = start_vertex
     self.end_vertex = end_vertex
-    self.path = [self.start_vertex]
-    self.max_weight = 0
-    self.max_path = []
+    self.max_length = 0
     self.start_time = time.time()
     self.paths_found = 0
 
-  def pathStr(self, path):
-    edge = self.graph.edges[0]
-    vertex = self.start_vertex
-    path_str = [str(edge.length), '(' + vertex.coordStr() + ')']
-    for vi in range(1, len(path)):
-      prev = path[vi-1]
-      next = path[vi]
-      edge = prev.findEdgeTo(next)
-      path_str.append(str(edge.length))
-      path_str.append('(' + next.coordStr() + ')')
-    edge = self.graph.edges[1]
-    path_str.append(str(edge.length))
-    return '-'.join(path_str)
+    # I don't understand--using this rather than vertex.visited flags seems
+    # like it should be a small speed improvement, but it doubles the runtime
+    # with cpython and has no measurable effect with pypy.
+    self.visited_bitmask = 0
 
 
-
-def findHeaviestPath(graph):
-  assert isinstance(graph, Graph)
-
-  first_edge, last_edge = graph.edges[:2]
-  assert len(first_edge.vertices) == 1
-  assert len(last_edge.vertices) == 1
-
-  start_vertex = first_edge.vertices[0]
+def findLongestPath(graph):
+  start_vertex = graph.vertex_list[0]
+  end_vertex = graph.vertex_list[1]
   start_vertex.visited = True
-  trav = TraverseData(graph, start_vertex, last_edge.vertices[0])
+  trav = TraverseData(graph, end_vertex)
+  # trav.visited_bitmask |= start_vertex.index
 
-  weight = first_edge.length + last_edge.length
+  length = graph.entry_edge_len + graph.exit_edge_len
   timer = time.time()
 
-  findHeaviestRecurse(trav, start_vertex, weight, 0)
+  findLongestRecurse(trav, start_vertex, length, 0)
+  # trav.visited_bitmask ^= start_vertex.index
   start_vertex.visited = False
 
   # print(f'traverse time {time.time() - trav.start_time:.3f} sec')
   # print(f'{trav.paths_found} paths found')
-  # print(f'part2 {trav.max_weight} {trav.pathStr(trav.max_path)}')
-  print(f'part2 {trav.max_weight}')
+  # print(f'part2 {trav.max_length} {trav.pathStr(trav.max_path)}')
+
+  # print(f'part2 {trav.max_length}')
+  return trav.max_length
 
 
-def findHeaviestRecurse(trav, vertex, weight, depth):
+def findLongestRecurse(trav, vertex, length, depth):
   # assert not vertex.visited
 
   # vertex = trav.path[-1]
   # print(f'{"  " * depth} fh {vertex}')
   
-  # graph.vertices[1] is end vertex
   if vertex == trav.end_vertex:
-    # print(f'{weight} path {trav.pathStr(trav.path)}')
+    # print(f'path length {length} found')
+    # print(f'{length} path {trav.pathStr(trav.path)}')
     trav.paths_found += 1
-    if weight > trav.max_weight:
-      trav.max_weight = weight
+    if length > trav.max_length:
+      trav.max_length = length
       # trav.max_path = trav.path.copy()
-      # print(f'{time.time() - trav.start_time:.3f} heaviest found {weight}')
+      # print(f'{time.time() - trav.start_time:.3f} longest found {length}')
     return
 
-  for edge in vertex.edges:
-    vnext = edge.otherVertex(vertex)
-    if vnext and not vnext.visited:
-      # trav.path.append(vnext)
-      vnext.visited = True
-      findHeaviestRecurse(trav, vnext, weight + edge.length + 1, depth + 1)
-      vnext.visited = False
-      # trav.path.pop()
+  for next_vertex, next_length in vertex.peers:
+    # if not trav.visited_bitmask & next_vertex.index:
+    if not next_vertex.visited:
+      # trav.visited_bitmask |= next_vertex.index
+      next_vertex.visited = True
+      findLongestRecurse(trav, next_vertex, length + next_length + 1, depth + 1)
+      # trav.visited_bitmask ^= next_vertex.index
+      next_vertex.visited = False
 
 
-def part2(filename):
-  with open(filename) as inf:
-    grid = readGrid(inf, True)
-
+def findLongestPathNoRecursion(graph):
   """
-  for row in grid:
-    for c in range(len(row)):
-      if row[c] == '>': row[c] = '.'
-      if row[c] == 'v': row[c] = '.'
+  This is slower than the recursive solution with cpython, but is
+  2x faster with pypy.
   """
 
-  """
-  drawGrid(grid, 'day23.png',
-           {'>': (0,255,0),  # right green
-            'v': (0,0,255),  # down blue
-            })
-  """
-    
-  graph = buildGraph(grid)
-  # graph.print()
-
-  # this makes it 3.3x faster, even though the same number of complete
-  # paths are found; it's just less backtracking
-  makePerimeterDirectional(graph)
+  visited_bits = 0
   
-  # graph.writeGraphViz('day23.gv')
-  
-  """
-  color_table = {e: e.color for e in graph.edges}
-  color_table['+'] = (255, 0, 0)
-  drawGrid(grid, 'day23b.png', color_table)
-  """
-  
-  findHeaviestPath(graph)
+  vertex = graph.vertex_list[0]
+  end_vertex = graph.vertex_list[1]
+  # vertex.visited = True
+  visited_bits |= vertex.index
+  start_time = time.time()
+  max_length = 0
+  paths_found = 0
+
+  length = graph.entry_edge_len + graph.exit_edge_len
+  timer = time.time()
+
+  stack = []
+
+  # len(vertex.peers) is really slow, so don't call it often
+  peer_idx = len(vertex.peers) - 1
+
+  while True:
+    if peer_idx < 0:
+      # vertex.visited = False
+      visited_bits ^= vertex.index
+      if stack:
+        vertex, length, peer_idx = stack.pop()
+        continue
+      else:
+        break
+
+    next_vertex, edge_length = vertex.peers[peer_idx]
+    next_length = length + edge_length + 1
+    peer_idx -= 1
+
+    if next_vertex == end_vertex:
+      paths_found += 1
+      # print(f'path length {next_length} found')
+      if next_length > max_length:
+        max_length = next_length
+        # print(f'{time.time() - start_time:.3f} longest found {next_length}')
+    else:
+      # if not next_vertex.visited:
+      if not visited_bits & next_vertex.index:
+        stack.append((vertex, length, peer_idx))
+        vertex = next_vertex
+        # vertex.visited = True
+        visited_bits |= next_vertex.index
+        length = next_length
+        peer_idx = len(vertex.peers) - 1
+        
+  # print(f'traverse time {time.time() - start_time:.3f} sec')
+
+  return max_length
+
 
 
 if __name__ == '__main__':
   filename = 'day23.in.txt'
   if len(sys.argv) > 1:
     filename = sys.argv[1]
-  part1(filename)
-  part2(filename)
+  timer = time.time()
+  
+  with open(filename) as inf:
+    grid = readGrid(inf, True)
+
+  graph = buildGraph(copy.deepcopy(grid))
+  # length = findLongestPath(graph)
+  length = findLongestPathNoRecursion(graph)
+  print(f'part1 {length}')
+  
+  graph.makeAllEdgesBiDirectional()
+  graph.makePerimeterDirectional()
+  # graph.writeGraphViz('day23.gv')
+  # length = findLongestPath(graph)
+  length = findLongestPathNoRecursion(graph)
+  print(f'part2 {length}')
+
+  # print(f'timer {time.time() - timer:.3f}')
